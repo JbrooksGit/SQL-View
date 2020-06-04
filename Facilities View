@@ -1,0 +1,32 @@
+ALTER view [dbo].[Bv_facilities] as
+With Current_month  AS(
+SELECT aa.Date_as_of,blum.measure,aa.provider_facility,blum.direction as dir,sum(aa.denominator) as Den,
+case   
+when blum.direction = 'down' then ROUND(CAST(sum(aa.numerator) as FLOAT),1) 
+when blum.direction = 'up' then  ROUND(CAST(sum(aa.denominator) - sum(aa.numerator) as FLOAT),1)
+end as Num
+from scorecard aa join Blu_measure blum on aa.Measure_file = blum.measure_file
+left join blu_IPA bluipa on bluipa.provider_Facility_Name = aa.Provider_Facility
+where Date_as_of = (select max(Date_as_of) 
+								from scorecard)
+group by aa.provider_facility, Date_as_of,aa.measure_file,blum.measure,blum.direction),
+previous_month AS(
+SELECT ss.Date_as_of,ss.provider_facility,blum.Measure, sum(ss.numerator) as Num,sum(ss.denominator) as Den, 
+ROUND(CAST(sum(ss.numerator) * 100.0 / sum(ss.denominator) as FLOAT),1) AS old_Score
+from scorecard ss  join Blu_measure blum on ss.Measure_file = blum.measure_file
+left join blu_IPA bluipa on bluipa.provider_Facility_Name = ss.Provider_Facility
+where Date_as_of = (select DATEADD(month, -4, max(Date_as_of))
+										from scorecard)
+group by ss.provider_facility, Date_as_of,ss.measure_file,blum.measure,blum.direction)
+select Current_month.Date_as_of as Current_month,previous_month.Date_as_of as previous_month,Current_month.provider_facility,Current_month.measure as Measure_File, Current_month.dir as Direction,
+Current_month.Num,Current_month.Den, /*Current_month.score as score*/
+case 
+when Current_month.dir = 'up' then 1 - ((previous_month.Old_score)/100) 
+else (previous_month.Old_score)/100
+end as previous_score,ipa.IPA_Wide_score as IPAWideScore, 
+case 
+when Current_month.dir = 'up' then (100 - ipa.StateAvg)
+else ipa.StateAvg
+end as StateAvg
+from Current_month LEFT join previous_month on Current_month.Measure = previous_month.Measure and Current_month.provider_facility = previous_month.provider_facility
+left join dbo.IPAWide ipa on ipa.measure = Current_month.measure
